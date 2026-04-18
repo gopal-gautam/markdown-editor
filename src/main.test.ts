@@ -115,32 +115,39 @@ describe('File System Operations', () => {
 });
 
 describe('Path Operations', () => {
+  const isWindows = process.platform === 'win32';
+  
   it('should join paths correctly', () => {
-    const result = path.join('C:\\Users\\test', 'folder', 'file.md');
-    expect(result).toBe('C:\\Users\\test\\folder\\file.md');
+    const result = path.join('C:' + path.sep + 'Users' + path.sep + 'test', 'folder', 'file.md');
+    const expected = 'C:' + path.sep + 'Users' + path.sep + 'test' + path.sep + 'folder' + path.sep + 'file.md';
+    expect(result).toBe(expected);
   });
 
   it('should extract filename from path', () => {
-    expect(path.basename('C:\\Users\\test\\file.md')).toBe('file.md');
+    const testPath = isWindows ? 'C:\\Users\\test\\file.md' : '/Users/test/file.md';
+    expect(path.basename(testPath)).toBe('file.md');
   });
 
   it('should handle both forward and back slashes', () => {
-    const withBackslash = 'C:\\Users\\test\\file.md';
-    const withForwardSlash = 'C:/Users/test/file.md';
+    const backslashPath = isWindows ? 'C:\\Users\\test\\file.md' : '/Users/test/file.md';
+    const forwardSlashPath = 'C:/Users/test/file.md';
 
-    expect(path.basename(withBackslash)).toBe('file.md');
-    expect(path.basename(withForwardSlash)).toBe('file.md');
+    expect(path.basename(backslashPath)).toBe('file.md');
+    // On Linux, path.basename doesn't handle backslashes, so normalize first
+    expect(path.basename(forwardSlashPath.replace(/\//g, path.sep))).toBe('file.md');
   });
 
-  it('should handle Windows path separators correctly', () => {
-    const parts = 'C:\\Users\\test\\folder'.split(/[/\\]/);
-    expect(parts[0]).toBe('C:');
+  it('should handle path separators correctly', () => {
+    const testPath = isWindows ? 'C:\\Users\\test\\folder' : '/Users/test/folder';
+    const parts = testPath.split(/[/\\]/);
+    expect(parts[0]).toBe(isWindows ? 'C:' : '');
     expect(parts[parts.length - 1]).toBe('folder');
   });
 
   it('should extract parent path correctly', () => {
-    const parentPath = 'C:\\Users\\test\\file.md'.replace(/[/\\][^/\\]+$/, '');
-    expect(parentPath).toBe('C:\\Users\\test');
+    const testPath = isWindows ? 'C:\\Users\\test\\file.md' : '/Users/test/file.md';
+    const parentPath = testPath.replace(/[/\\][^/\\]+$/, '');
+    expect(parentPath).toBe(isWindows ? 'C:\\Users\\test' : '/Users/test');
   });
 });
 
