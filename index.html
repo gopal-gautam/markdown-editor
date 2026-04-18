@@ -7,6 +7,39 @@
   </head>
   <body>
     <div id="app">
+      <nav id="menu-bar">
+        <div class="menu-group">
+          <div class="menu-item" id="menu-file">
+            <span>File</span>
+            <div class="menu-dropdown">
+              <button id="menu-open-folder">Open Folder...</button>
+              <div class="menu-separator"></div>
+              <button id="menu-new-folder">New Folder</button>
+              <button id="menu-new-file">New File</button>
+              <div class="menu-separator"></div>
+              <button id="menu-save">Save <span class="shortcut">Ctrl+S</span></button>
+            </div>
+          </div>
+          <div class="menu-item" id="menu-edit">
+            <span>Edit</span>
+            <div class="menu-dropdown">
+              <button id="menu-undo">Undo <span class="shortcut">Ctrl+Z</span></button>
+              <button id="menu-redo">Redo <span class="shortcut">Ctrl+Y</span></button>
+              <div class="menu-separator"></div>
+              <button id="menu-cut">Cut <span class="shortcut">Ctrl+X</span></button>
+              <button id="menu-copy">Copy <span class="shortcut">Ctrl+C</span></button>
+              <button id="menu-paste">Paste <span class="shortcut">Ctrl+V</span></button>
+            </div>
+          </div>
+          <div class="menu-item" id="menu-view">
+            <span>View</span>
+            <div class="menu-dropdown">
+              <button id="menu-toggle-sidebar">Toggle Sidebar</button>
+            </div>
+          </div>
+        </div>
+      </nav>
+      <div class="content">
       <aside id="sidebar">
         <div class="sidebar-header">
           <span class="sidebar-title">EXPLORER</span>
@@ -83,15 +116,16 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="10" x2="3" y2="10"/><line x1="21" y1="6" x2="3" y2="6"/><line x1="21" y1="14" x2="3" y2="14"/><line x1="21" y1="18" x2="3" y2="18"/></svg>
             </button>
           </div>
+          <div class="toolbar-group">
+            <button id="save-btn" title="Save (Ctrl+S)">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
+            </button>
+          </div>
         </div>
-        <header id="editor-header">
-          <div class="tab-bar" id="tab-bar"></div>
-          <button id="save-btn" title="Save (Ctrl+S)">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
-          </button>
-        </header>
+        <div class="tab-bar" id="tab-bar"></div>
         <div id="editor-container"></div>
       </main>
+      </div>
       <div id="context-menu" class="context-menu">
         <button id="new-folder-in-ctx">New Folder</button>
         <button id="new-file-in-ctx">New File</button>

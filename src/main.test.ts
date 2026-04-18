@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
+import { markdownToHtml, htmlToMarkdown } from './lib/markdown';
 
 const testDir = path.join(process.cwd(), 'test-files');
 
@@ -130,6 +131,17 @@ describe('Path Operations', () => {
     expect(path.basename(withBackslash)).toBe('file.md');
     expect(path.basename(withForwardSlash)).toBe('file.md');
   });
+
+  it('should handle Windows path separators correctly', () => {
+    const parts = 'C:\\Users\\test\\folder'.split(/[/\\]/);
+    expect(parts[0]).toBe('C:');
+    expect(parts[parts.length - 1]).toBe('folder');
+  });
+
+  it('should extract parent path correctly', () => {
+    const parentPath = 'C:\\Users\\test\\file.md'.replace(/[/\\][^/\\]+$/, '');
+    expect(parentPath).toBe('C:\\Users\\test');
+  });
 });
 
 describe('Markdown Parsing', () => {
@@ -188,6 +200,12 @@ describe('Markdown Parsing', () => {
     const line = '> Quote text';
     expect(line.match(/^>\s/)).not.toBeNull();
   });
+
+  it('should filter empty lines', () => {
+    const lines = ['# Heading', '', 'code', '', '- item1', '', '- item2'].filter(l => l.trim() !== '');
+    expect(lines.length).toBe(4);
+    expect(lines[1]).toBe('code');
+  });
 });
 
 describe('HTML Generation', () => {
@@ -234,8 +252,102 @@ describe('HTML Generation', () => {
   });
 });
 
+describe('Markdown to HTML Conversion - Bullet Lists', () => {
+  it('should parse simple bullet list', () => {
+    const markdown = '- item1\n- item2\n- item3';
+    const html = markdownToHtml(markdown);
+    expect(html).toContain('<ul>');
+    expect(html).toContain('<li>item1</li>');
+    expect(html).toContain('</ul>');
+  });
+
+  it('should parse bullet list with multiple items', () => {
+    const markdown = '- First item\n- Second item\n- Third item';
+    const html = markdownToHtml(markdown);
+    expect(html).toContain('<li>First item</li>');
+    expect(html).toContain('<li>Second item</li>');
+    expect(html).toContain('<li>Third item</li>');
+  });
+
+  it('should close bullet list after heading', () => {
+    const markdown = '- item1\n- item2\n# Heading';
+    const html = markdownToHtml(markdown);
+    expect(html).toContain('<ul>');
+    expect(html).toContain('</ul>');
+    expect(html).toContain('<h1>');
+  });
+
+  it('should handle empty input', () => {
+    const html = markdownToHtml('');
+    expect(html).toBe('<p></p>');
+  });
+
+  it('should handle null input', () => {
+    const html = markdownToHtml(null as any);
+    expect(html).toBe('<p></p>');
+  });
+
+  it('should not create extra empty list items', () => {
+    const markdown = '- item1\n- item2';
+    const html = markdownToHtml(markdown);
+    const emptyLi = html.match(/<li>\s*<\/li>/g);
+    expect(emptyLi).toBeFalsy();
+  });
+
+  it('should handle mixed content - bullet then heading', () => {
+    const markdown = '- item1\n# Heading\nParagraph text';
+    const html = markdownToHtml(markdown);
+    expect(html).toContain('<ul>');
+    expect(html).toContain('<h1>');
+    expect(html).toContain('<p>');
+  });
+});
+
+describe('Tab Management', () => {
+  it('should find existing tab', () => {
+    const tabs = [
+      { name: 'file1.md', path: 'C:\\test\\file1.md' },
+      { name: 'file2.md', path: 'C:\\test\\file2.md' }
+    ];
+    const findTab = (path: string) => tabs.findIndex(t => t.path === path);
+    
+    expect(findTab('C:\\test\\file1.md')).toBe(0);
+    expect(findTab('C:\\test\\file2.md')).toBe(1);
+    expect(findTab('C:\\test\\file3.md')).toBe(-1);
+  });
+
+  it('should add new tab at beginning', () => {
+    const tabs = [{ name: 'file1.md', path: 'C:\\test\\file1.md' }];
+    const newTab = { name: 'file2.md', path: 'C:\\test\\file2.md' };
+    tabs.unshift(newTab);
+    
+    expect(tabs.length).toBe(2);
+    expect(tabs[0].name).toBe('file2.md');
+  });
+
+  it('should remove tab by path', () => {
+    const tabs = [
+      { name: 'file1.md', path: 'C:\\test\\file1.md' },
+      { name: 'file2.md', path: 'C:\\test\\file2.md' }
+    ];
+    const removePath = 'C:\\test\\file1.md';
+    const newTabs = tabs.filter(t => t.path !== removePath);
+    
+    expect(newTabs.length).toBe(1);
+    expect(newTabs[0].name).toBe('file2.md');
+  });
+});
+
 describe('App Config', () => {
   it('should have correct app name', () => {
     expect('markdown-editor').toBeTruthy();
+  });
+
+  it('should have required dependencies in package.json', () => {
+    const pkgPath = path.join(process.cwd(), 'package.json');
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+    
+    expect(pkg.dependencies['@tiptap/core']).toBeTruthy();
+    expect(pkg.devDependencies.electron).toBeTruthy();
   });
 });

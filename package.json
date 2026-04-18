@@ -1,8 +1,8 @@
 {
   "name": "markdown-editor",
-  "productName": "markdown-editor",
+  "productName": "Markdown Editor",
   "version": "1.0.0",
-  "description": "My Electron application description",
+  "description": "A professional desktop Markdown editor with Word-like editing that saves in Markdown format",
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {

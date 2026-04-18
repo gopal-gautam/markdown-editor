@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, Menu } from 'electron';
 import path from 'node:path';
 import fs from 'node:fs';
 import started from 'electron-squirrel-startup';
@@ -6,6 +6,8 @@ import log from 'electron-log';
 
 log.initialize();
 log.transports.file.level = 'info';
+
+app.applicationMenu = null;
 
 if (started) {
   app.quit();

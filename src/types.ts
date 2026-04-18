@@ -19,8 +19,8 @@ declare global {
       showOpenFolder: () => Promise<string | null>;
     };
   }
-  var MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
-  var MAIN_WINDOW_VITE_NAME: string;
+  const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
+  const MAIN_WINDOW_VITE_NAME: string;
 }
 
 export {};
