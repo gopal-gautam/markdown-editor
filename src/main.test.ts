@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { markdownToHtml, htmlToMarkdown } from './lib/markdown';
+import { markdownToHtml } from './lib/markdown';
 
 const testDir = path.join(process.cwd(), 'test-files');
 

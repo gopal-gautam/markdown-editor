@@ -18,6 +18,8 @@
               <button id="menu-new-file">New File</button>
               <div class="menu-separator"></div>
               <button id="menu-save">Save <span class="shortcut">Ctrl+S</span></button>
+              <div class="menu-separator"></div>
+              <button id="menu-ai-settings">AI Settings...</button>
             </div>
           </div>
           <div class="menu-item" id="menu-edit">
@@ -121,10 +123,33 @@
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17,21 17,13 7,13 7,21"/><polyline points="7,3 7,8 15,8"/></svg>
             </button>
           </div>
+          <div class="toolbar-group">
+            <button id="ai-btn" title="Ask AI">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2a2 2 0 0 1 2 2c0 .74-.4 1.39-1 1.73V7h1a7 7 0 0 1 7 7h1a1 1 0 0 1 1 1v3a1 1 0 0 1-1 1h-1v1a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-1H2a1 1 0 0 1-1-1v-3a1 1 0 0 1 1-1h1a7 7 0 0 1 7-7h1V5.73c-.6-.34-1-.99-1-1.73a2 2 0 0 1 2-2z"/><circle cx="8" cy="14" r="2"/><circle cx="16" cy="14" r="2"/></svg>
+              <span style="font-size: 12px; font-weight: 600;">+AI</span>
+            </button>
+          </div>
+          <div class="toolbar-group">
+            <button id="ai-chat-btn" class="active" title="AI Chat">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+              <span style="font-size: 12px; font-weight: 600;">Chat</span>
+            </button>
+          </div>
         </div>
         <div class="tab-bar" id="tab-bar"></div>
         <div id="editor-container"></div>
       </main>
+      <aside id="ai-chat-sidebar" class="ai-chat-sidebar">
+        <div class="ai-chat-header">
+          <span>AI Chat</span>
+          <button id="ai-chat-close">&times;</button>
+        </div>
+        <div id="ai-chat-messages" class="ai-chat-messages"></div>
+        <div class="ai-chat-input-container">
+          <textarea id="ai-chat-input" placeholder="Ask about your document..." rows="2"></textarea>
+          <button id="ai-chat-send">Send</button>
+        </div>
+      </aside>
       </div>
       <div id="context-menu" class="context-menu">
         <button id="new-folder-in-ctx">New Folder</button>
@@ -146,6 +171,54 @@
           <div class="dialog-footer">
             <button id="dialog-cancel">Cancel</button>
             <button id="dialog-confirm" class="primary">Create</button>
+          </div>
+        </div>
+      </div>
+      <div id="ai-settings-overlay" class="dialog-overlay">
+        <div class="dialog" style="width: 400px;">
+          <div class="dialog-header">
+            <span id="ai-settings-title">AI Model Settings</span>
+            <button id="ai-settings-close">&times;</button>
+          </div>
+          <div class="dialog-body" style="display: flex; flex-direction: column; gap: 12px;">
+            <label>
+              <span>Provider</span>
+              <select id="ai-provider-select" style="width: 100%; padding: 8px; margin-top: 4px;">
+                <option value="">Select Provider</option>
+              </select>
+            </label>
+            <label>
+              <span>Model</span>
+              <input type="text" id="ai-model-input" placeholder="e.g., gpt-4o" style="width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box;" />
+            </label>
+            <label>
+              <span>API Key</span>
+              <input type="password" id="ai-api-key-input" placeholder="Enter API key" style="width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box;" />
+            </label>
+            <label id="ai-base-url-label" style="display: none;">
+              <span>Base URL (optional)</span>
+              <input type="text" id="ai-base-url-input" placeholder="Custom endpoint URL" style="width: 100%; padding: 8px; margin-top: 4px; box-sizing: border-box;" />
+            </label>
+          </div>
+          <div class="dialog-footer">
+            <button id="ai-settings-cancel">Cancel</button>
+            <button id="ai-settings-save" class="primary">Save</button>
+          </div>
+        </div>
+      </div>
+      <div id="ai-prompt-overlay" class="dialog-overlay">
+        <div class="dialog" style="width: 500px;">
+          <div class="dialog-header">
+            <span>Ask AI</span>
+            <button id="ai-prompt-close">&times;</button>
+          </div>
+          <div class="dialog-body" style="display: flex; flex-direction: column; gap: 12px;">
+            <textarea id="ai-prompt-input" placeholder="Enter your prompt..." style="width: 100%; height: 120px; padding: 8px; resize: vertical; box-sizing: border-box; font-family: inherit;"></textarea>
+            <div id="ai-prompt-status" style="font-size: 12px; color: #666; display: none;"></div>
+          </div>
+          <div class="dialog-footer">
+            <button id="ai-prompt-cancel">Cancel</button>
+            <button id="ai-prompt-submit" class="primary">Generate</button>
           </div>
         </div>
       </div>

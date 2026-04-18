@@ -3,9 +3,51 @@ import path from 'node:path';
 import fs from 'node:fs';
 import started from 'electron-squirrel-startup';
 import log from 'electron-log';
+import { AIProvider, PROVIDERS } from './lib/ai-config';
 
 log.initialize();
 log.transports.file.level = 'info';
+
+let rootFolderPath: string | null = null;
+
+const getAIConfigPath = () => {
+  if (!rootFolderPath) return null;
+  return path.join(rootFolderPath, '.markdown-editor', 'settings.json');
+};
+
+const ensureAIConfigDir = () => {
+  if (!rootFolderPath) return false;
+  const configDir = path.join(rootFolderPath, '.markdown-editor');
+  if (!fs.existsSync(configDir)) {
+    fs.mkdirSync(configDir, { recursive: true });
+  }
+  return true;
+};
+
+export const loadAIConfig = (): { provider: AIProvider; model: string; apiKey: string; baseUrl: string } | null => {
+  const configPath = getAIConfigPath();
+  if (!configPath) return null;
+  try {
+    if (fs.existsSync(configPath)) {
+      return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    }
+  } catch {
+    // silently ignore
+  }
+  return null;
+};
+
+export const saveAIConfig = (config: { provider: AIProvider; model: string; apiKey: string; baseUrl: string }) => {
+  if (!ensureAIConfigDir()) return false;
+  const configPath = getAIConfigPath();
+  if (!configPath) return false;
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+  return true;
+};
+
+export const setRootFolder = (folderPath: string) => {
+  rootFolderPath = folderPath;
+};
 
 app.applicationMenu = null;
 
@@ -151,13 +193,121 @@ ipcMain.handle('dialog:show-open-folder', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory'],
   });
-  return result.canceled ? null : result.filePaths[0];
+  if (!result.canceled && result.filePaths[0]) {
+    setRootFolder(result.filePaths[0]);
+    return result.filePaths[0];
+  }
+  return null;
 });
+
+ipcMain.handle('ai:get-providers', async () => {
+  return PROVIDERS;
+});
+
+ipcMain.handle('ai:load-config', async () => {
+  return loadAIConfig();
+});
+
+ipcMain.handle('ai:save-config', async (_, config: { provider: AIProvider; model: string; apiKey: string; baseUrl: string }) => {
+  saveAIConfig(config);
+  return true;
+});
+
+ipcMain.handle('app:set-root-folder', async (_, folderPath: string) => {
+  setRootFolder(folderPath);
+  return true;
+});
+
+ipcMain.handle('app:get-root-folder', async () => {
+  return rootFolderPath;
+});
+
+ipcMain.handle('ai:generate', async (_, prompt: string) => {
+  const config = loadAIConfig();
+  if (!config) {
+    return { error: 'AI not configured. Please set up AI settings first.' };
+  }
+
+  try {
+    const { buildHeaders, buildChatCompletionBody, getEndpoint, parseResponse } = await import('./lib/ai-config');
+    
+    const headers = buildHeaders(config);
+    const body = buildChatCompletionBody(config.provider, config.model, [
+      { role: 'system', content: 'You are a helpful assistant. Respond in markdown format.' },
+      { role: 'user', content: prompt }
+    ]);
+    const endpoint = getEndpoint(config);
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: headers,
+      body: JSON.stringify(body),
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      // Check for image-related errors
+      const errorLower = errorText.toLowerCase();
+      if (errorLower.includes('image') && (errorLower.includes('does not support') || errorLower.includes('not supported') || errorLower.includes('not allow') || errorLower.includes('cannot'))) {
+        return { error: 'This model does not support image input.' };
+      }
+      // Try to parse JSON error for more details
+      try {
+        const errorJson = JSON.parse(errorText);
+        if (errorJson.error && errorJson.error.message) {
+          return { error: errorJson.error.message };
+        }
+      } catch {
+        // Not JSON, use raw error
+      }
+      return { error: `API error: ${response.status} - ${errorText}` };
+    }
+
+    const data = await response.json();
+    const result = parseResponse(config.provider, data);
+    return { result: result };
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error';
+    // Check if it's an image-related error
+    if (errorMessage.toLowerCase().includes('image') && (errorMessage.toLowerCase().includes('support') || errorMessage.toLowerCase().includes('not'))) {
+      return { error: 'This model does not support image input.' };
+    }
+    return { error: `Request failed: ${errorMessage}` };
+  }
+});
+
+const createAppMenu = () => {
+  const template: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'AI',
+      submenu: [
+        {
+          label: 'Configure Model...',
+          accelerator: 'CmdOrCtrl+Shift+A',
+          click: () => {
+            const win = BrowserWindow.getFocusedWindow();
+            if (win) {
+              win.webContents.send('menu:open-ai-settings');
+            }
+          },
+        },
+      ],
+    },
+  ];
+  const menu = Menu.buildFromTemplate(template);
+  Menu.setApplicationMenu(menu);
+}
+
+createAppMenu();
+
+app.applicationMenu = null;
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
-app.on('ready', createWindow);
+app.on('ready', () => {
+  createWindow();
+});
 
 // Quit when all windows are closed, except on macOS. There, it's common
 // for applications and their menu bar to stay active until the user quits

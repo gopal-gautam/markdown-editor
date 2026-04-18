@@ -1,22 +1,70 @@
 // Markdown to HTML parser
 export function markdownToHtml(markdown: string): string {
-  const lines = (markdown || '').split('\n').filter(l => l.trim() !== '');
-  if (lines.length === 0) return '<p></p>';
+  if (!markdown || !markdown.trim()) return '<p></p>';
 
-  let html = '<p>';
+  // First escape HTML entities to prevent XSS and processing issues
+  const escapeHtml = (text: string): string => {
+    return text
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  };
+
+  // Process inline formatting with proper ordering
+  const processInline = (text: string): string => {
+    let result = escapeHtml(text);
+    
+    // Code blocks first (inline)
+    result = result.replace(/`([^`]+)`/g, '<code>$1</code>');
+    
+    // Bold and italic (must process *** before ** and *)
+    result = result.replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>');
+    result = result.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+    result = result.replace(/\*(.+?)\*/g, '<em>$1</em>');
+    
+    // Underline
+    result = result.replace(/__(.+?)__/g, '<u>$1</u>');
+    result = result.replace(/(?<!\w)_(.+?)_(?!\w)/g, '<u>$1</u>');
+    
+    // Strikethrough
+    result = result.replace(/~~(.+?)~~/g, '<del>$1</del>');
+    
+    // Links and images
+    result = result.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />');
+    result = result.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>');
+    
+    return result;
+  };
+
+  const lines = markdown.split('\n');
+  let html = '';
   let inCodeBlock = false;
   let inBulletList = false;
   let inOrderedList = false;
+  let inParagraph = false;
 
-  for (const line of lines) {
-    if (line.startsWith('```')) {
+  const closeLists = () => {
+    if (inBulletList) { html += '</ul>'; inBulletList = false; }
+    if (inOrderedList) { html += '</ol>'; inOrderedList = false; }
+  };
+
+  const closeParagraph = () => {
+    if (inParagraph) { html += '</p>'; inParagraph = false; }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    // Code blocks
+    if (trimmed.startsWith('```')) {
+      closeParagraph();
+      closeLists();
       if (inCodeBlock) {
         html += '</code></pre>';
         inCodeBlock = false;
       } else {
-        if (inBulletList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ul>$&</ul>'); inBulletList = false; }
-        if (inOrderedList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ol>$&</ol>'); inOrderedList = false; }
-        html += '</p><pre><code>';
+        html += '<pre><code>';
         inCodeBlock = true;
       }
       continue;
@@ -27,68 +75,84 @@ export function markdownToHtml(markdown: string): string {
       continue;
     }
 
-    if (line.match(/^#{1,6}\s/)) {
-      if (inBulletList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ul>$&</ul>'); inBulletList = false; }
-      if (inOrderedList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ol>$&</ol>'); inOrderedList = false; }
-      const level = line.match(/^#{1,6}/)![0].length;
-      html += `</p><h${level}>${line.replace(/^#{1,6}\s+/, '')}</h${level}><p>`;
+    // Empty line - close paragraph and lists
+    if (trimmed === '') {
+      closeParagraph();
+      closeLists();
       continue;
     }
 
-    if (line.match(/^[-*]\s/)) {
+    // Headings
+    if (trimmed.match(/^#{1,6}\s/)) {
+      closeParagraph();
+      closeLists();
+      const level = trimmed.match(/^#{1,6}/)![0].length;
+      const content = trimmed.replace(/^#{1,6}\s*/, '');
+      html += `<h${level}>${processInline(content)}</h${level}>`;
+      continue;
+    }
+
+    // Bullet list
+    if (trimmed.match(/^[-*+]\s/)) {
+      closeParagraph();
       if (!inBulletList) {
-        if (inOrderedList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ol>$&</ol>'); inOrderedList = false; }
+        closeLists();
         html += '<ul>';
         inBulletList = true;
       }
-      html += `<li>${line.replace(/^[-*]\s+/, '')}</li>`;
+      const content = trimmed.replace(/^[-*+]\s*/, '');
+      html += `<li>${processInline(content)}</li>`;
       continue;
     }
 
-    if (line.match(/^\d+\.\s/)) {
+    // Ordered list
+    if (trimmed.match(/^\d+\.\s/)) {
+      closeParagraph();
       if (!inOrderedList) {
-        if (inBulletList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ul>$&</ul>'); inBulletList = false; }
+        closeLists();
         html += '<ol>';
         inOrderedList = true;
       }
-      html += `<li>${line.replace(/^\d+\.\s+/, '')}</li>`;
+      const content = trimmed.replace(/^\d+\.\s*/, '');
+      html += `<li>${processInline(content)}</li>`;
       continue;
     }
 
-    if (inBulletList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ul>$&</ul>'); inBulletList = false; }
-    if (inOrderedList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ol>$&</ol>'); inOrderedList = false; }
-
-    if (line.match(/^>\s/)) {
-      html += `</p><blockquote>${line.replace(/^>\s*/, '')}</blockquote><p>`;
+    // Blockquote
+    if (trimmed.startsWith('>')) {
+      closeParagraph();
+      closeLists();
+      const content = trimmed.replace(/^>\s*/, '');
+      html += `<blockquote>${processInline(content)}</blockquote>`;
       continue;
     }
 
-    if (line.trim() === '') {
-      html += '</p><p>';
+    // Horizontal rule
+    if (trimmed.match(/^[-*_]{3,}$/)) {
+      closeParagraph();
+      closeLists();
+      html += '<hr />';
       continue;
     }
 
-    html += processInlineFormatting(line);
+    // Regular paragraph text
+    closeLists();
+    if (!inParagraph) {
+      html += '<p>';
+      inParagraph = true;
+    } else {
+      html += '<br />';
+    }
+    html += processInline(line);
   }
 
-  if (inBulletList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ul>$&</ul>'); }
-  if (inOrderedList) { html = html.replace(/<li>(.+?)<\/li>$/, '<ol>$&</ol>'); }
-  if (inCodeBlock) { html += '</code></pre>'; }
-  html += '</p>';
-  return html;
-}
+  // Close any open tags
+  closeParagraph();
+  if (inBulletList) html += '</ul>';
+  if (inOrderedList) html += '</ol>';
+  if (inCodeBlock) html += '</code></pre>';
 
-function processInlineFormatting(text: string): string {
-  return text
-    .replace(/\*\*\*(.+?)\*\*\*/g, '<strong><em>$1</em></strong>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\*(.+?)\*/g, '<em>$1</em>')
-    .replace(/__(.+?)__/g, '<u>$1</u>')
-    .replace(/_(.+?)_/g, '<u>$1</u>')
-    .replace(/~~(.+?)~~/g, '<del>$1</del>')
-    .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2">$1</a>')
-    .replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" />');
+  return html || '<p></p>';
 }
 
 // HTML to Markdown converter
@@ -144,6 +208,9 @@ export function htmlToMarkdown(element: Element): string {
       }
       case 'li': return `- ${processNodeList(el).replace(/\n/g, '\n  ')}\n`;
       case 'hr': return '---\n';
+      case 'section':
+      case 'main':
+      case 'article': return processNodeList(el);
       default: return processNodeList(el);
     }
   };

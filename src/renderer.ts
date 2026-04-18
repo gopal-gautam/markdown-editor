@@ -12,6 +12,23 @@ import { markdownToHtml, htmlToMarkdown } from './lib/markdown';
 
 import './index.css';
 
+interface Provider {
+  id: string;
+  name: string;
+  defaultModels: string[];
+  baseUrl?: string;
+  supportsCustomEndpoint: boolean;
+}
+
+interface AIConfig {
+  provider: string;
+  model: string;
+  apiKey: string;
+  baseUrl: string;
+}
+
+let aiProviders: Provider[] = [];
+
 // State
 const state: AppState = {
   editor: null,
@@ -53,7 +70,7 @@ function renderFileTree(items: FileItemData[]): string {
   return items.map(item => renderTreeItem(item)).join('');
 }
 
-async function loadDirectory(dirPath: string, isRoot = false): Promise<void> {
+async function loadDirectory(dirPath: string, isRoot = false, forceRefresh = false): Promise<void> {
   if (isRoot || !state.rootPath) {
     state.rootPath = dirPath;
     expandedFolders.clear();
@@ -62,7 +79,7 @@ async function loadDirectory(dirPath: string, isRoot = false): Promise<void> {
 
   try {
     let items = expandedFoldersData.get(dirPath);
-    if (!items) {
+    if (!items || forceRefresh) {
       const rawItems = await window.electronAPI.readDirectory(dirPath);
       items = rawItems.map(item => ({
         name: item.name,
@@ -99,7 +116,6 @@ function attachFileListeners(): void {
       const target = item as HTMLElement;
       const path = target.dataset.path!;
       const isDir = target.dataset.isDir === 'true';
-      const chevron = item.querySelector('.chevron');
 
       if (isDir && (e.target as HTMLElement).classList.contains('chevron')) {
         if (expandedFolders.has(path)) {
@@ -187,6 +203,7 @@ async function openFile(filePath: string): Promise<void> {
 
   state.hasUnsavedChanges = false;
   updateSaveStatus();
+  updateAIButtonState();
 }
 
 function setActiveTab(path: string): void {
@@ -235,6 +252,7 @@ async function closeTab(path: string, e: Event): Promise<void> {
     renderTabs();
     state.hasUnsavedChanges = false;
     updateSaveStatus();
+    updateAIButtonState();
   } else {
     openTabs.splice(tabIndex, 1);
     renderTabs();
@@ -482,12 +500,344 @@ elements.dialogOverlay.addEventListener('click', (e) => {
   if (e.target === elements.dialogOverlay) hideDialog();
 });
 
+// ============ AI SETTINGS DIALOG ============
+
+const aiSettingsOverlay = document.getElementById('ai-settings-overlay') as HTMLDivElement;
+const aiProviderSelect = document.getElementById('ai-provider-select') as HTMLSelectElement;
+const aiModelInput = document.getElementById('ai-model-input') as HTMLInputElement;
+const aiApiKeyInput = document.getElementById('ai-api-key-input') as HTMLInputElement;
+const aiBaseUrlLabel = document.getElementById('ai-base-url-label') as HTMLLabelElement;
+const aiBaseUrlInput = document.getElementById('ai-base-url-input') as HTMLInputElement;
+const aiSettingsSave = document.getElementById('ai-settings-save') as HTMLButtonElement;
+const aiSettingsCancel = document.getElementById('ai-settings-cancel') as HTMLButtonElement;
+const aiSettingsClose = document.getElementById('ai-settings-close') as HTMLButtonElement;
+
+async function showAISettings(): Promise<void> {
+  aiProviderSelect.innerHTML = '<option value="">Select Provider</option>';
+  aiProviders.forEach(function(provider) {
+    const option = document.createElement('option');
+    option.value = provider.id;
+    option.textContent = provider.name;
+    aiProviderSelect.appendChild(option);
+  });
+
+  // Load saved config
+  const savedConfig = await window.electronAPI.loadAIConfig();
+  if (savedConfig) {
+    aiProviderSelect.value = savedConfig.provider;
+    aiModelInput.value = savedConfig.model;
+    aiApiKeyInput.value = savedConfig.apiKey;
+    aiBaseUrlInput.value = savedConfig.baseUrl || '';
+    
+    const provider = aiProviders.find(function(p) { return p.id === savedConfig.provider; });
+    if (provider) {
+      aiBaseUrlLabel.style.display = provider.supportsCustomEndpoint ? 'block' : 'none';
+      if (provider.id === 'lmstudio' || provider.id === 'ollama') {
+        aiApiKeyInput.parentElement!.style.display = 'none';
+      } else {
+        aiApiKeyInput.parentElement!.style.display = 'block';
+      }
+    }
+  } else {
+    aiProviderSelect.value = '';
+    aiModelInput.value = '';
+    aiApiKeyInput.value = '';
+    aiBaseUrlInput.value = '';
+    aiBaseUrlLabel.style.display = 'none';
+  }
+
+  aiSettingsOverlay.classList.add('show');
+}
+
+function hideAISettings(): void {
+  aiSettingsOverlay.classList.remove('show');
+}
+
+async function handleAISettingsSave(): Promise<void> {
+  const provider = aiProviderSelect.value;
+  const model = aiModelInput.value.trim();
+  const apiKey = aiApiKeyInput.value.trim();
+  const baseUrl = aiBaseUrlInput.value.trim();
+
+  if (!provider || !model) {
+    aiModelInput.focus();
+    return;
+  }
+
+  const config: AIConfig = {
+    provider: provider,
+    model: model,
+    apiKey: apiKey,
+    baseUrl: baseUrl,
+  };
+
+  await window.electronAPI.saveAIConfig(config);
+  hideAISettings();
+}
+
+aiProviderSelect.addEventListener('change', function() {
+  const providerId = aiProviderSelect.value;
+  const provider = aiProviders.find(function(p) { return p.id === providerId; });
+
+  if (provider) {
+    if (provider.defaultModels.length > 0) {
+      aiModelInput.value = provider.defaultModels[0];
+    } else {
+      aiModelInput.value = '';
+    }
+
+    aiBaseUrlLabel.style.display = provider.supportsCustomEndpoint ? 'block' : 'none';
+    aiBaseUrlInput.placeholder = provider.baseUrl || 'Custom endpoint URL';
+
+    if (provider.id === 'lmstudio' || provider.id === 'ollama') {
+      aiApiKeyInput.parentElement!.style.display = 'none';
+    } else {
+      aiApiKeyInput.parentElement!.style.display = 'block';
+    }
+  } else {
+    aiBaseUrlLabel.style.display = 'none';
+  }
+});
+
+aiSettingsSave.addEventListener('click', handleAISettingsSave);
+aiSettingsCancel.addEventListener('click', hideAISettings);
+aiSettingsClose.addEventListener('click', hideAISettings);
+aiSettingsOverlay.addEventListener('click', function(e) {
+  if (e.target === aiSettingsOverlay) hideAISettings();
+});
+
+// ============ AI PROMPT DIALOG ============
+
+const aiPromptOverlay = document.getElementById('ai-prompt-overlay') as HTMLDivElement;
+const aiPromptInput = document.getElementById('ai-prompt-input') as HTMLTextAreaElement;
+const aiPromptStatus = document.getElementById('ai-prompt-status') as HTMLDivElement;
+const aiPromptSubmit = document.getElementById('ai-prompt-submit') as HTMLButtonElement;
+const aiPromptCancel = document.getElementById('ai-prompt-cancel') as HTMLButtonElement;
+const aiPromptClose = document.getElementById('ai-prompt-close') as HTMLButtonElement;
+const aiBtn = document.getElementById('ai-btn') as HTMLButtonElement;
+
+function showAIPrompt(): void {
+  if (!state.currentFile) return;
+  aiPromptInput.value = '';
+  aiPromptStatus.style.display = 'none';
+  aiPromptStatus.textContent = '';
+  aiPromptSubmit.disabled = false;
+  aiPromptSubmit.textContent = 'Generate';
+  aiPromptOverlay.classList.add('show');
+  aiPromptInput.focus();
+}
+
+function hideAIPrompt(): void {
+  aiPromptOverlay.classList.remove('show');
+}
+
+async function handleAIPromptSubmit(): Promise<void> {
+  const prompt = aiPromptInput.value.trim();
+  if (!prompt) {
+    aiPromptInput.focus();
+    return;
+  }
+
+  aiPromptSubmit.disabled = true;
+  aiPromptSubmit.textContent = 'Generating...';
+  aiPromptStatus.style.display = 'block';
+  aiPromptStatus.textContent = 'Calling AI...';
+  aiPromptStatus.style.color = '#666';
+
+  try {
+    const response = await window.electronAPI.generateAI(prompt);
+    
+    if (response.error) {
+      aiPromptStatus.textContent = response.error;
+      aiPromptStatus.style.color = '#d32f2f';
+      aiPromptSubmit.disabled = false;
+      aiPromptSubmit.textContent = 'Generate';
+      return;
+    }
+
+    if (response.result) {
+      // Append the AI response to the editor (convert markdown to HTML first)
+      if (state.editor) {
+        const currentContent = state.editor.getText();
+        const separator = currentContent.length > 0 && !currentContent.endsWith('\n') ? '\n\n' : '\n';
+        const htmlContent = markdownToHtml(separator + response.result);
+        state.editor.commands.insertContent(htmlContent);
+      }
+      hideAIPrompt();
+    }
+  } catch (err) {
+    aiPromptStatus.textContent = 'Error: ' + (err instanceof Error ? err.message : 'Unknown error');
+    aiPromptStatus.style.color = '#d32f2f';
+    aiPromptSubmit.disabled = false;
+    aiPromptSubmit.textContent = 'Generate';
+  }
+}
+
+// Update AI button state based on whether a file is open
+function updateAIButtonState(): void {
+  aiBtn.disabled = !state.currentFile;
+  aiBtn.title = state.currentFile ? 'Ask AI' : 'Open a file first';
+  aiBtn.style.opacity = state.currentFile ? '1' : '0.5';
+}
+
+aiBtn.addEventListener('click', showAIPrompt);
+aiPromptSubmit.addEventListener('click', handleAIPromptSubmit);
+aiPromptCancel.addEventListener('click', hideAIPrompt);
+aiPromptClose.addEventListener('click', hideAIPrompt);
+aiPromptOverlay.addEventListener('click', function(e) {
+  if (e.target === aiPromptOverlay) hideAIPrompt();
+});
+aiPromptInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    handleAIPromptSubmit();
+  }
+  if (e.key === 'Escape') {
+    hideAIPrompt();
+  }
+});
+
+// ============ AI CHAT SIDEBAR ============
+
+const aiChatBtn = document.getElementById('ai-chat-btn') as HTMLButtonElement;
+const aiChatSidebar = document.getElementById('ai-chat-sidebar') as HTMLElement;
+const aiChatClose = document.getElementById('ai-chat-close') as HTMLButtonElement;
+const aiChatMessages = document.getElementById('ai-chat-messages') as HTMLDivElement;
+const aiChatInput = document.getElementById('ai-chat-input') as HTMLTextAreaElement;
+const aiChatSend = document.getElementById('ai-chat-send') as HTMLButtonElement;
+
+function toggleAIChat(): void {
+  const isOpen = aiChatSidebar.classList.contains('open');
+  if (isOpen) {
+    aiChatSidebar.classList.remove('open');
+    aiChatBtn.classList.remove('active');
+  } else {
+    aiChatSidebar.classList.add('open');
+    aiChatBtn.classList.add('active');
+  }
+}
+
+function closeAIChat(): void {
+  aiChatSidebar.classList.remove('open');
+  aiChatBtn.classList.remove('active');
+}
+
+function addChatMessage(content: string, isUser: boolean): void {
+  // Remove empty state if present
+  const emptyMsg = aiChatMessages.querySelector('.ai-chat-empty');
+  if (emptyMsg) emptyMsg.remove();
+
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'ai-chat-message ' + (isUser ? 'user' : 'ai');
+  
+  // Render markdown for AI messages
+  if (!isUser) {
+    msgDiv.innerHTML = markdownToHtml(content);
+  } else {
+    msgDiv.textContent = content;
+  }
+  
+  aiChatMessages.appendChild(msgDiv);
+  aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+}
+
+function showChatThinking(): void {
+  const thinkingDiv = document.createElement('div');
+  thinkingDiv.className = 'ai-chat-message ai ai-chat-thinking';
+  thinkingDiv.textContent = 'Thinking...';
+  thinkingDiv.id = 'ai-chat-thinking';
+  aiChatMessages.appendChild(thinkingDiv);
+  aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+}
+
+function hideChatThinking(): void {
+  const thinking = document.getElementById('ai-chat-thinking');
+  if (thinking) thinking.remove();
+}
+
+async function handleChatSend(): Promise<void> {
+  const message = aiChatInput.value.trim();
+  if (!message) return;
+
+  if (!state.currentFile) {
+    addChatMessage('Please open a file first to use the chat.', false);
+    return;
+  }
+
+  // Add user message
+  addChatMessage(message, true);
+  aiChatInput.value = '';
+
+  // Show thinking
+  showChatThinking();
+  aiChatSend.disabled = true;
+
+  try {
+    // Get current file content
+    const fileContent = await window.electronAPI.readFile(state.currentFile.path);
+    
+    // Build prompt with context
+    const fullPrompt = 'Context: The following is the content of the current file:\n\n' +
+      '```\n' + fileContent + '\n```\n\n' +
+      'User question: ' + message + '\n\n' +
+      'Please answer based on the context provided. If the answer requires code, use markdown code blocks. Be helpful and concise.';
+
+    const response = await window.electronAPI.generateAI(fullPrompt);
+    
+    hideChatThinking();
+
+    if (response.error) {
+      addChatMessage('Error: ' + response.error, false);
+    } else if (response.result) {
+      addChatMessage(response.result, false);
+    }
+  } catch (err) {
+    hideChatThinking();
+    addChatMessage('Error: ' + (err instanceof Error ? err.message : 'Unknown error'), false);
+  }
+
+  aiChatSend.disabled = false;
+}
+
+aiChatBtn.addEventListener('click', toggleAIChat);
+aiChatClose.addEventListener('click', closeAIChat);
+aiChatSend.addEventListener('click', handleChatSend);
+aiChatInput.addEventListener('keydown', function(e) {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+    handleChatSend();
+  }
+});
+
+// Show initial empty state
+aiChatMessages.innerHTML = '<div class="ai-chat-empty">Open a file and ask me anything about it!</div>';
+
 // ============ INITIALIZATION ============
 
 async function init(): Promise<void> {
   const docsPath = await window.electronAPI.getDocumentsPath();
+  
+  // Set root folder to documents path
+  await window.electronAPI.setRootFolder(docsPath);
+  
   await loadDirectory(docsPath, true);
   initEditor();
+  updateAIButtonState();
+
+  // Load AI providers and config
+  aiProviders = await window.electronAPI.getProviders();
+  const savedConfig = await window.electronAPI.loadAIConfig();
+  if (savedConfig) {
+    aiProviderSelect.value = savedConfig.provider;
+    aiModelInput.value = savedConfig.model;
+    aiApiKeyInput.value = savedConfig.apiKey;
+    aiBaseUrlInput.value = savedConfig.baseUrl || '';
+    const provider = aiProviders.find(function(p) { return p.id === savedConfig.provider; });
+    if (provider) {
+      aiBaseUrlLabel.style.display = provider.supportsCustomEndpoint ? 'block' : 'none';
+      if (provider.id === 'lmstudio' || provider.id === 'ollama') {
+        aiApiKeyInput.parentElement!.style.display = 'none';
+      }
+    }
+  }
 
   // Menu bar buttons
   document.getElementById('menu-open-folder')?.addEventListener('click', async () => {
@@ -497,6 +847,12 @@ async function init(): Promise<void> {
   document.getElementById('menu-new-folder')?.addEventListener('click', () => showDialog('new-folder'));
   document.getElementById('menu-new-file')?.addEventListener('click', () => showDialog('new-file'));
   document.getElementById('menu-save')?.addEventListener('click', saveFile);
+  document.getElementById('menu-ai-settings')?.addEventListener('click', showAISettings);
+
+  // Listen for menu event from main process
+  window.electronAPI.onOpenAISettings(function() {
+    showAISettings();
+  });
 
   // Edit menu
   document.getElementById('menu-undo')?.addEventListener('click', () => state.editor?.chain().focus().undo().run());
@@ -516,7 +872,7 @@ async function init(): Promise<void> {
   elements.newFolderBtn?.addEventListener('click', () => showDialog('new-folder'));
   elements.newFileBtn?.addEventListener('click', () => showDialog('new-file'));
   elements.refreshBtn?.addEventListener('click', async () => {
-    if (state.currentPath) await loadDirectory(state.currentPath);
+    if (state.currentPath) await loadDirectory(state.currentPath, false, true);
   });
 
   // Context menu buttons
