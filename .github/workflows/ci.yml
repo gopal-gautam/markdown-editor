@@ -107,7 +107,7 @@ jobs:
   release:
     needs: [build, build-windows]
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && contains(github.commit_message, ' release:')
+    if: github.event_name == 'push' && contains(github.event.head_commit.message, ' release:')
     permissions:
       contents: write
 
