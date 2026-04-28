@@ -1,6 +1,7 @@
 {
   "name": "markdown-editor",
   "productName": "Markdown Editor",
+  "executableName": "markdown-editor",
   "version": "1.0.0",
   "description": "A professional desktop Markdown editor with Word-like editing that saves in Markdown format",
   "main": ".vite/build/main.js",
