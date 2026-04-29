@@ -135,7 +135,9 @@ jobs:
 
       - name: Extract version
         id: version
-        run: echo "VERSION=$(node -p 'require(\"./package.json\").version')" >> $GITHUB_OUTPUT
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
 
       - name: Delete existing release and tag if exists
         run: |

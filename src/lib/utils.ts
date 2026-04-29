@@ -21,7 +21,14 @@ export const elements = {
   renameItemBtn: document.getElementById('rename-item-btn') as HTMLButtonElement,
   newFolderInCtx: document.getElementById('new-folder-in-ctx') as HTMLButtonElement,
   newFileInCtx: document.getElementById('new-file-in-ctx') as HTMLButtonElement,
-} as const;
+  editorContextMenu: document.getElementById('editor-context-menu') as HTMLDivElement,
+  editorUndo: document.getElementById('editor-undo') as HTMLButtonElement,
+  editorRedo: document.getElementById('editor-redo') as HTMLButtonElement,
+  editorCut: document.getElementById('editor-cut') as HTMLButtonElement,
+  editorCopy: document.getElementById('editor-copy') as HTMLButtonElement,
+  editorPaste: document.getElementById('editor-paste') as HTMLButtonElement,
+  editorSelectAll: document.getElementById('editor-select-all') as HTMLButtonElement,
+};
 
 // App State
 export interface AppState {
