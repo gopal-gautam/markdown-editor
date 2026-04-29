@@ -137,9 +137,17 @@ jobs:
         id: version
         run: echo "VERSION=$(node -p 'require(\"./package.json\").version')" >> $GITHUB_OUTPUT
 
+      - name: Delete existing release and tag if exists
+        run: |
+          gh release delete v${{ steps.version.outputs.VERSION }} --yes || true
+          git push origin :refs/tags/v${{ steps.version.outputs.VERSION }} || true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.VERSION }}
           files: out/release/**
           generate_release_notes: true
         env:
