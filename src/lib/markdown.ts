@@ -200,13 +200,35 @@ export function htmlToMarkdown(element: Element): string {
         if (!content) return '';
         return content.split('\n').map(q => `> ${q}`).join('\n') + '\n';
       }
-      case 'ul':
-      case 'ol': {
+      case 'ul': {
         const listContent = processNodeList(el);
         if (!listContent.trim()) return '';
         return listContent + '\n';
       }
-      case 'li': return `- ${processNodeList(el).replace(/\n/g, '\n  ')}\n`;
+      case 'ol': {
+        const children = Array.from(el.children).filter(child => child.tagName.toLowerCase() === 'li');
+        if (children.length === 0) return '';
+        const listContent = children.map((child, index) => {
+          const li = child as Element;
+          const isTask = li.getAttribute('data-type') === 'taskItem';
+          const isChecked = li.getAttribute('data-checked') === 'true';
+          const prefix = isTask ? `- [${isChecked ? 'x' : ' '}] ` : `${index + 1}. `;
+          const content = isTask
+            ? processNodeList(li.querySelector('div') || li)
+            : processNodeList(li);
+          return `${prefix}${content.replace(/\n/g, '\n   ').trim()}`;
+        }).join('\n');
+        return listContent + '\n';
+      }
+      case 'li': {
+        const isTask = el.getAttribute('data-type') === 'taskItem';
+        const isChecked = el.getAttribute('data-checked') === 'true';
+        const prefix = isTask ? `- [${isChecked ? 'x' : ' '}] ` : '- ';
+        const content = isTask
+          ? processNodeList(el.querySelector('div') || el)
+          : processNodeList(el);
+        return `${prefix}${content.replace(/\n/g, '\n   ').trim()}\n`;
+      }
       case 'hr': return '---\n';
       case 'section':
       case 'main':

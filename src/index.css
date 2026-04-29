@@ -238,6 +238,21 @@ html, body {
   background: var(--bg-active);
 }
 
+.file-item.current {
+  background: rgba(0, 127, 212, 0.15);
+  border-left: 3px solid var(--accent-color);
+}
+
+.current-badge {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  background: var(--accent-color);
+  border-radius: 50%;
+  margin-left: 6px;
+  font-size: 0;
+}
+
 .file-icon {
   flex-shrink: 0;
   width: 16px;
@@ -597,6 +612,21 @@ html, body {
 
 .context-menu button.danger:hover {
   background: var(--danger-bg);
+}
+
+.context-menu button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.context-menu button:disabled:hover {
+  background: transparent;
+}
+
+.context-menu .shortcut {
+  color: var(--text-muted);
+  font-size: 11px;
+  margin-left: 16px;
 }
 
 .dialog-overlay {

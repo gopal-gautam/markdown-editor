@@ -48,6 +48,7 @@ const expandedFoldersData = new Map<string, FileItemData[]>();
 
 function renderTreeItem(item: FileItemData, depth = 0): string {
   const isExpanded = expandedFolders.has(item.path);
+  const isCurrent = item.path === (state.currentPath || state.rootPath);
   const childHtml = item.isDirectory && isExpanded && item.children
     ? item.children.map(child => renderTreeItem(child, depth + 1)).join('')
     : '';
@@ -57,10 +58,10 @@ function renderTreeItem(item: FileItemData, depth = 0): string {
     : '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M2 1.75C2 .784 2.784 0 3.75 0h6.586c.45 0 .883.184 1.207.525l2.623 2.958c.317.357.493.822.493 1.299v8.468A1.75 1.75 0 0 1 13.75 15h-10A1.75 1.75 0 0 1 2 13.25v-11.5z"/></svg>';
 
   return `
-    <div class="file-item" data-path="${escapeHtml(item.path)}" data-is-dir="${item.isDirectory}" style="padding-left: ${depth * 16 + 8}px">
+    <div class="file-item ${isCurrent ? 'current' : ''}" data-path="${escapeHtml(item.path)}" data-is-dir="${item.isDirectory}" style="padding-left: ${depth * 16 + 8}px">
       ${item.isDirectory ? `<span class="chevron">${isExpanded ? '▼' : '▶'}</span>` : ''}
       <span class="file-icon">${icon}</span>
-      <span class="file-name">${escapeHtml(item.name)}</span>
+      <span class="file-name">${escapeHtml(item.name)}${isCurrent ? ' <span class="current-badge">●</span>' : ''}</span>
     </div>
     ${childHtml}
   `;
@@ -323,6 +324,68 @@ function initEditor(): void {
   });
 
   setupToolbar();
+  setupEditorContextMenu();
+}
+
+function setupEditorContextMenu(): void {
+  if (!state.editor) return;
+
+  // Show context menu on right-click in editor
+  elements.editorContainer.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    const rect = elements.editorContainer.getBoundingClientRect();
+    elements.editorContextMenu.style.top = `${e.clientY}px`;
+    elements.editorContextMenu.style.left = `${e.clientX}px`;
+    elements.editorContextMenu.style.display = 'block';
+
+    // Update undo/redo button states
+    elements.editorUndo.disabled = !state.editor?.can().undo();
+    elements.editorRedo.disabled = !state.editor?.can().redo();
+    elements.editorUndo.style.opacity = elements.editorUndo.disabled ? '0.5' : '1';
+    elements.editorRedo.style.opacity = elements.editorRedo.disabled ? '0.5' : '1';
+  });
+
+  // Handle menu item clicks
+  elements.editorUndo.addEventListener('click', () => {
+    state.editor?.chain().focus().undo().run();
+    elements.editorContextMenu.style.display = 'none';
+  });
+
+  elements.editorRedo.addEventListener('click', () => {
+    state.editor?.chain().focus().redo().run();
+    elements.editorContextMenu.style.display = 'none';
+  });
+
+  elements.editorCut.addEventListener('click', () => {
+    const selection = window.getSelection();
+    if (selection && selection.toString()) {
+      document.execCommand('cut');
+    }
+    elements.editorContextMenu.style.display = 'none';
+  });
+
+  elements.editorCopy.addEventListener('click', () => {
+    const selection = window.getSelection();
+    if (selection && selection.toString()) {
+      document.execCommand('copy');
+    }
+    elements.editorContextMenu.style.display = 'none';
+  });
+
+  elements.editorPaste.addEventListener('click', () => {
+    document.execCommand('paste');
+    elements.editorContextMenu.style.display = 'none';
+  });
+
+  elements.editorSelectAll.addEventListener('click', () => {
+    state.editor?.chain().focus().selectAll().run();
+    elements.editorContextMenu.style.display = 'none';
+  });
+
+  // Hide context menu when clicking elsewhere
+  document.addEventListener('click', () => {
+    elements.editorContextMenu.style.display = 'none';
+  });
 }
 
 function setupToolbar(): void {
@@ -406,16 +469,19 @@ function showDialog(mode: DialogMode, defaultName = '', callback?: (name: string
   elements.dialogInput.value = defaultName;
   dialogCallback = callback || null;
 
+  const targetPath = state.contextMenuPath || state.currentPath || state.rootPath;
+  const displayPath = targetPath || 'Unknown';
+
   switch (mode) {
     case 'new-file':
       elements.dialogTitle.textContent = 'New File';
-      elements.dialogHint.textContent = '.md will be added automatically';
+      elements.dialogHint.textContent = `.md will be added automatically — Creating in: ${displayPath}`;
       elements.dialogConfirm.textContent = 'Create';
       elements.dialogInput.placeholder = 'File name';
       break;
     case 'new-folder':
       elements.dialogTitle.textContent = 'New Folder';
-      elements.dialogHint.textContent = '';
+      elements.dialogHint.textContent = `Creating in: ${displayPath}`;
       elements.dialogConfirm.textContent = 'Create';
       elements.dialogInput.placeholder = 'Folder name';
       break;
@@ -456,18 +522,31 @@ async function handleDialogConfirm(): Promise<void> {
     return;
   }
 
-  const targetPath = state.contextMenuPath || state.currentPath;
+  const targetPath = state.contextMenuPath || state.currentPath || state.rootPath;
+  if (!targetPath) {
+    alert('No target directory selected. Please select a directory first.');
+    return;
+  }
+
+  // If target is a file (has extension), use its parent directory
+  const targetDir = targetPath.match(/\.[^/\\]+$/) ? getParentPath(targetPath) : targetPath;
 
   switch (dialogMode) {
     case 'new-file': {
       const fileName = name.endsWith('.md') ? name : name + '.md';
-      await window.electronAPI.createFile(joinPath(targetPath!, fileName));
-      await loadDirectory(state.rootPath!, true);
+      const newFilePath = joinPath(targetDir, fileName);
+      await window.electronAPI.createFile(newFilePath);
+      // Clear cache for directory and refresh
+      expandedFoldersData.delete(targetDir);
+      await loadDirectory(targetDir, state.rootPath === targetDir, true);
       break;
     }
     case 'new-folder': {
-      await window.electronAPI.createFolder(joinPath(targetPath!, name));
-      await loadDirectory(state.rootPath!, true);
+      const newFolderPath = joinPath(targetDir, name);
+      await window.electronAPI.createFolder(newFolderPath);
+      // Clear cache for directory and refresh
+      expandedFoldersData.delete(targetDir);
+      await loadDirectory(targetDir, state.rootPath === targetDir, true);
       break;
     }
     case 'link':
