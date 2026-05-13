@@ -39,7 +39,7 @@ jobs:
   build:
     needs: lint-and-test
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, ' release:')
 
     steps:
       - name: Checkout code
@@ -73,7 +73,8 @@ jobs:
   build-windows:
     needs: lint-and-test
     runs-on: windows-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && contains(github.event.head_commit.message, ' release:')
+
 
     steps:
       - name: Checkout code

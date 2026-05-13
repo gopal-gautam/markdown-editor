@@ -11,13 +11,11 @@ log.transports.file.level = 'info';
 let rootFolderPath: string | null = null;
 
 const getAIConfigPath = () => {
-  if (!rootFolderPath) return null;
-  return path.join(rootFolderPath, '.markdown-editor', 'settings.json');
+  return path.join(app.getPath('userData'), 'ai-settings.json');
 };
 
 const ensureAIConfigDir = () => {
-  if (!rootFolderPath) return false;
-  const configDir = path.join(rootFolderPath, '.markdown-editor');
+  const configDir = app.getPath('userData');
   if (!fs.existsSync(configDir)) {
     fs.mkdirSync(configDir, { recursive: true });
   }
@@ -47,6 +45,10 @@ export const saveAIConfig = (config: { provider: AIProvider; model: string; apiK
 
 export const setRootFolder = (folderPath: string) => {
   rootFolderPath = folderPath;
+  try {
+    const recentPath = path.join(app.getPath('userData'), 'recent-folder.json');
+    fs.writeFileSync(recentPath, JSON.stringify({ path: folderPath }));
+  } catch {}
 };
 
 app.applicationMenu = null;
@@ -222,21 +224,30 @@ ipcMain.handle('app:get-root-folder', async () => {
   return rootFolderPath;
 });
 
-ipcMain.handle('ai:generate', async (_, prompt: string) => {
+ipcMain.handle('app:load-recent-folder', async () => {
+  try {
+    const recentPath = path.join(app.getPath('userData'), 'recent-folder.json');
+    if (fs.existsSync(recentPath)) {
+      const data = JSON.parse(fs.readFileSync(recentPath, 'utf-8'));
+      return data.path || null;
+    }
+  } catch {}
+  return null;
+});
+
+ipcMain.on('ai:generate-stream', async (event, messages: { role: string; content: string }[]) => {
   const config = loadAIConfig();
   if (!config) {
-    return { error: 'AI not configured. Please set up AI settings first.' };
+    event.sender.send('ai:stream-error', 'AI not configured. Please set up AI settings first.');
+    return;
   }
 
   try {
-    const { buildHeaders, buildChatCompletionBody, getEndpoint, parseResponse } = await import('./lib/ai-config');
-    
+    const { buildHeaders, buildStreamBody, getStreamEndpoint, parseStreamLine } = await import('./lib/ai-config');
+
     const headers = buildHeaders(config);
-    const body = buildChatCompletionBody(config.provider, config.model, [
-      { role: 'system', content: 'You are a helpful assistant. Respond in markdown format.' },
-      { role: 'user', content: prompt }
-    ]);
-    const endpoint = getEndpoint(config);
+    const body = buildStreamBody(config.provider, config.model, messages);
+    const endpoint = getStreamEndpoint(config);
 
     const response = await fetch(endpoint, {
       method: 'POST',
@@ -246,33 +257,65 @@ ipcMain.handle('ai:generate', async (_, prompt: string) => {
 
     if (!response.ok) {
       const errorText = await response.text();
-      // Check for image-related errors
       const errorLower = errorText.toLowerCase();
       if (errorLower.includes('image') && (errorLower.includes('does not support') || errorLower.includes('not supported') || errorLower.includes('not allow') || errorLower.includes('cannot'))) {
-        return { error: 'This model does not support image input.' };
+        event.sender.send('ai:stream-error', 'This model does not support image input.');
+        return;
       }
-      // Try to parse JSON error for more details
       try {
         const errorJson = JSON.parse(errorText);
         if (errorJson.error && errorJson.error.message) {
-          return { error: errorJson.error.message };
+          event.sender.send('ai:stream-error', errorJson.error.message);
+          return;
         }
       } catch {
         // Not JSON, use raw error
       }
-      return { error: `API error: ${response.status} - ${errorText}` };
+      event.sender.send('ai:stream-error', `API error: ${response.status} - ${errorText}`);
+      return;
     }
 
-    const data = await response.json();
-    const result = parseResponse(config.provider, data);
-    return { result: result };
+    const reader = response.body?.getReader();
+    if (!reader) {
+      event.sender.send('ai:stream-error', 'Failed to read response stream.');
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        const text = parseStreamLine(line, config.provider);
+        if (text) {
+          event.sender.send('ai:stream-chunk', text);
+        }
+      }
+    }
+
+    // Process remaining buffer
+    if (buffer.trim()) {
+      const text = parseStreamLine(buffer, config.provider);
+      if (text) {
+        event.sender.send('ai:stream-chunk', text);
+      }
+    }
+
+    event.sender.send('ai:stream-done');
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : 'Unknown error';
-    // Check if it's an image-related error
     if (errorMessage.toLowerCase().includes('image') && (errorMessage.toLowerCase().includes('support') || errorMessage.toLowerCase().includes('not'))) {
-      return { error: 'This model does not support image input.' };
+      event.sender.send('ai:stream-error', 'This model does not support image input.');
+      return;
     }
-    return { error: `Request failed: ${errorMessage}` };
+    event.sender.send('ai:stream-error', `Request failed: ${errorMessage}`);
   }
 });
 

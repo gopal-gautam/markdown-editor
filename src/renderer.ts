@@ -123,6 +123,7 @@ function attachFileListeners(): void {
           expandedFolders.delete(path);
         } else {
           expandedFolders.add(path);
+          await loadDirectory(path);
         }
         const rootItems = expandedFoldersData.get(state.rootPath!);
         elements.fileBrowser.innerHTML = renderFileTree(rootItems || []);
@@ -235,8 +236,9 @@ async function closeTab(path: string, e: Event): Promise<void> {
   if (tabIndex < 0) return;
 
   if (state.hasUnsavedChanges && state.currentFile?.path === path) {
-    if (!confirm('Do you want to save changes?')) return;
-    await saveFile();
+    if (confirm('Save changes before closing?')) {
+      await saveFile();
+    }
   }
 
   if (state.currentFile?.path === path) {
@@ -708,48 +710,55 @@ function showAIPrompt(): void {
 
 function hideAIPrompt(): void {
   aiPromptOverlay.classList.remove('show');
+  window.electronAPI.removeAIStreamListeners();
 }
 
-async function handleAIPromptSubmit(): Promise<void> {
+function handleAIPromptSubmit(): void {
+  window.electronAPI.removeAIStreamListeners();
+
   const prompt = aiPromptInput.value.trim();
   if (!prompt) {
     aiPromptInput.focus();
     return;
   }
 
-  aiPromptSubmit.disabled = true;
-  aiPromptSubmit.textContent = 'Generating...';
-  aiPromptStatus.style.display = 'block';
-  aiPromptStatus.textContent = 'Calling AI...';
-  aiPromptStatus.style.color = '#666';
+  // Close dialog immediately and stream into editor
+  hideAIPrompt();
+  aiPromptSubmit.disabled = false;
+  aiPromptSubmit.textContent = 'Generate';
 
-  try {
-    const response = await window.electronAPI.generateAI(prompt);
-    
-    if (response.error) {
-      aiPromptStatus.textContent = response.error;
-      aiPromptStatus.style.color = '#d32f2f';
-      aiPromptSubmit.disabled = false;
-      aiPromptSubmit.textContent = 'Generate';
-      return;
-    }
+  let errored = false;
+  let insertPos = state.editor?.state.doc.content.size ?? 0;
 
-    if (response.result) {
-      // Append the AI response to the editor (convert markdown to HTML first)
-      if (state.editor) {
-        const currentContent = state.editor.getText();
-        const separator = currentContent.length > 0 && !currentContent.endsWith('\n') ? '\n\n' : '\n';
-        const htmlContent = markdownToHtml(separator + response.result);
-        state.editor.commands.insertContent(htmlContent);
-      }
-      hideAIPrompt();
-    }
-  } catch (err) {
-    aiPromptStatus.textContent = 'Error: ' + (err instanceof Error ? err.message : 'Unknown error');
-    aiPromptStatus.style.color = '#d32f2f';
-    aiPromptSubmit.disabled = false;
-    aiPromptSubmit.textContent = 'Generate';
+  // Add a blank line before AI response if content exists
+  if (state.editor && state.editor.getText().length > 0) {
+    state.editor.commands.insertContentAt(insertPos, '\n\n');
+    insertPos = state.editor.state.doc.content.size;
   }
+
+  const messages = [
+    { role: 'system', content: 'You are a helpful assistant. Respond directly in markdown. Be concise — no filler phrases like "Let me", "I think", "Sure", etc. Just answer.' },
+    { role: 'user', content: prompt }
+  ];
+
+  window.electronAPI.onAIStreamChunk((chunk) => {
+    if (state.editor && !errored) {
+      state.editor.commands.insertContentAt(insertPos, chunk);
+      insertPos = state.editor.state.doc.content.size;
+    }
+  });
+
+  window.electronAPI.onAIStreamDone(() => {
+    window.electronAPI.removeAIStreamListeners();
+  });
+
+  window.electronAPI.onAIStreamError((error) => {
+    window.electronAPI.removeAIStreamListeners();
+    errored = true;
+    state.editor?.chain().focus().insertContent('\n\n*Error: ' + error + '*').run();
+  });
+
+  window.electronAPI.generateAIStream(messages);
 }
 
 // Update AI button state based on whether a file is open
@@ -833,7 +842,9 @@ function hideChatThinking(): void {
   if (thinking) thinking.remove();
 }
 
-async function handleChatSend(): Promise<void> {
+function handleChatSend(): void {
+  window.electronAPI.removeAIStreamListeners();
+
   const message = aiChatInput.value.trim();
   if (!message) return;
 
@@ -846,35 +857,53 @@ async function handleChatSend(): Promise<void> {
   addChatMessage(message, true);
   aiChatInput.value = '';
 
-  // Show thinking
-  showChatThinking();
+  // Remove empty state
+  const emptyMsg = aiChatMessages.querySelector('.ai-chat-empty');
+  if (emptyMsg) emptyMsg.remove();
+
+  // Create AI message placeholder
+  const msgDiv = document.createElement('div');
+  msgDiv.className = 'ai-chat-message ai';
+  aiChatMessages.appendChild(msgDiv);
+  aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+
   aiChatSend.disabled = true;
+  let accumulated = '';
 
-  try {
-    // Get current file content
-    const fileContent = await window.electronAPI.readFile(state.currentFile.path);
-    
-    // Build prompt with context
-    const fullPrompt = 'Context: The following is the content of the current file:\n\n' +
-      '```\n' + fileContent + '\n```\n\n' +
-      'User question: ' + message + '\n\n' +
-      'Please answer based on the context provided. If the answer requires code, use markdown code blocks. Be helpful and concise.';
+  window.electronAPI.onAIStreamChunk((chunk) => {
+    accumulated += chunk;
+    msgDiv.textContent = accumulated;
+    aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+  });
 
-    const response = await window.electronAPI.generateAI(fullPrompt);
-    
-    hideChatThinking();
+  window.electronAPI.onAIStreamDone(() => {
+    window.electronAPI.removeAIStreamListeners();
+    aiChatSend.disabled = false;
+    msgDiv.innerHTML = markdownToHtml(accumulated);
+    aiChatMessages.scrollTop = aiChatMessages.scrollHeight;
+  });
 
-    if (response.error) {
-      addChatMessage('Error: ' + response.error, false);
-    } else if (response.result) {
-      addChatMessage(response.result, false);
-    }
-  } catch (err) {
-    hideChatThinking();
-    addChatMessage('Error: ' + (err instanceof Error ? err.message : 'Unknown error'), false);
-  }
+  window.electronAPI.onAIStreamError((error) => {
+    window.electronAPI.removeAIStreamListeners();
+    aiChatSend.disabled = false;
+    msgDiv.textContent = 'Error: ' + error;
+    msgDiv.style.color = '#d32f2f';
+  });
 
-  aiChatSend.disabled = false;
+  // Build messages with context
+  window.electronAPI.readFile(state.currentFile.path).then((fileContent) => {
+    const messages = [
+      { role: 'system', content: 'You are a helpful assistant. Respond directly in markdown. Be concise — no filler phrases like "Let me", "I think", "Sure", etc. Just answer.' },
+      { role: 'user', content: 'Context document:\n```\n' + fileContent + '\n```\n\nUser question: ' + message }
+    ];
+    window.electronAPI.generateAIStream(messages);
+  }).catch(() => {
+    const messages = [
+      { role: 'system', content: 'You are a helpful assistant. Respond directly in markdown. Be concise — no filler phrases like "Let me", "I think", "Sure", etc. Just answer.' },
+      { role: 'user', content: message }
+    ];
+    window.electronAPI.generateAIStream(messages);
+  });
 }
 
 aiChatBtn.addEventListener('click', toggleAIChat);
@@ -892,12 +921,6 @@ aiChatMessages.innerHTML = '<div class="ai-chat-empty">Open a file and ask me an
 // ============ INITIALIZATION ============
 
 async function init(): Promise<void> {
-  const docsPath = await window.electronAPI.getDocumentsPath();
-  
-  // Set root folder to documents path
-  await window.electronAPI.setRootFolder(docsPath);
-  
-  await loadDirectory(docsPath, true);
   initEditor();
   updateAIButtonState();
 
@@ -916,6 +939,13 @@ async function init(): Promise<void> {
         aiApiKeyInput.parentElement!.style.display = 'none';
       }
     }
+  }
+
+  // Load recent folder
+  const recentFolder = await window.electronAPI.loadRecentFolder();
+  if (recentFolder) {
+    await window.electronAPI.setRootFolder(recentFolder);
+    await loadDirectory(recentFolder, true);
   }
 
   // Menu bar buttons
@@ -991,6 +1021,22 @@ async function init(): Promise<void> {
   elements.openFolderBtn.addEventListener('click', async () => {
     const folder = await window.electronAPI.showOpenFolder();
     if (folder) await loadDirectory(folder, true);
+  });
+
+  // Right-click on empty space in file browser to create files/folders at root level
+  elements.fileBrowser.addEventListener('contextmenu', (e) => {
+    // Only handle clicks NOT on a file item
+    if ((e.target as HTMLElement).closest('.file-item')) return;
+
+    e.preventDefault();
+    state.contextMenuPath = state.rootPath || state.currentPath || '';
+    elements.contextMenu.style.top = `${e.clientY}px`;
+    elements.contextMenu.style.left = `${e.clientX}px`;
+    elements.contextMenu.style.display = 'block';
+    elements.deleteItemBtn.style.display = 'none';
+    elements.renameItemBtn.style.display = 'none';
+    elements.newFolderInCtx.style.display = 'flex';
+    elements.newFileInCtx.style.display = 'flex';
   });
 
   document.addEventListener('click', () => {

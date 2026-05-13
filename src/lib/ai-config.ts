@@ -128,7 +128,7 @@ export function buildHeaders(config: AIModelConfig): Record<string, string> {
 }
 
 export function buildChatCompletionBody(provider: AIProvider, model: string, messages: { role: string; content: string }[]): object {
-  const baseBody = { model: model, messages: messages };
+  const baseBody: Record<string, unknown> = { model: model, messages: messages };
   switch (provider) {
     case 'anthropic':
       return {
@@ -142,6 +142,20 @@ export function buildChatCompletionBody(provider: AIProvider, model: string, mes
       };
     default:
       return baseBody;
+  }
+}
+
+export function buildStreamBody(provider: AIProvider, model: string, messages: { role: string; content: string }[]): object {
+  const body = buildChatCompletionBody(provider, model, messages) as Record<string, unknown>;
+  switch (provider) {
+    case 'anthropic':
+      body['stream'] = true;
+      return body;
+    case 'google':
+      return body;
+    default:
+      body['stream'] = true;
+      return body;
   }
 }
 
@@ -164,6 +178,68 @@ export function getEndpoint(config: AIModelConfig): string {
       return baseUrl + '/api/chat';
     default:
       return baseUrl + '/chat/completions';
+  }
+}
+
+export function getStreamEndpoint(config: AIModelConfig): string {
+  const baseUrl = config.baseUrl || getDefaultBaseUrl(config.provider) || '';
+  switch (config.provider) {
+    case 'openai':
+    case 'openrouter':
+    case 'azure':
+      return baseUrl + '/chat/completions';
+    case 'anthropic':
+      return baseUrl + '/messages';
+    case 'google':
+      return baseUrl + '/models/' + config.model + ':streamGenerateContent';
+    case 'aws':
+      return 'https://bedrock.' + (config.baseUrl || 'us-east-1') + '.amazonaws.com/model/' + config.model + '/invoke';
+    case 'lmstudio':
+      return baseUrl + '/chat/completions';
+    case 'ollama':
+      return baseUrl + '/api/chat';
+    default:
+      return baseUrl + '/chat/completions';
+  }
+}
+
+export function parseStreamLine(line: string, provider: AIProvider): string | null {
+  const trimmed = line.trim();
+  if (!trimmed) return null;
+
+  // Handle SSE format (data: {...})
+  let jsonStr: string | null = null;
+  if (trimmed.startsWith('data:')) {
+    jsonStr = trimmed.slice(5).trim();
+  } else {
+    // Try raw JSON (Ollama NDJSON)
+    jsonStr = trimmed;
+  }
+
+  if (!jsonStr || jsonStr === '[DONE]') return null;
+
+  try {
+    const data = JSON.parse(jsonStr);
+    switch (provider) {
+      case 'openai':
+      case 'openrouter':
+      case 'azure':
+      case 'lmstudio':
+        return data.choices?.[0]?.delta?.content || data.choices?.[0]?.text || null;
+      case 'anthropic':
+        if (data.type === 'content_block_delta') return data.delta?.text || null;
+        if (data.type === 'content_block_start') return data.content_block?.text || null;
+        return null;
+      case 'google':
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || null;
+      case 'ollama':
+        if (data.done) return null;
+        return data.message?.content || null;
+      default:
+        return data.choices?.[0]?.delta?.content || null;
+    }
+  } catch {
+    return null;
   }
 }
 

@@ -31,10 +31,25 @@ contextBridge.exposeInMainWorld('electronAPI', {
   loadAIConfig: () => ipcRenderer.invoke('ai:load-config'),
   saveAIConfig: (config: { provider: AIProvider; model: string; apiKey: string; baseUrl: string }) =>
     ipcRenderer.invoke('ai:save-config', config),
-  generateAI: (prompt: string) => ipcRenderer.invoke('ai:generate', prompt),
+  generateAIStream: (messages: { role: string; content: string }[]) => ipcRenderer.send('ai:generate-stream', messages),
+  onAIStreamChunk: (callback: (chunk: string) => void) => {
+    ipcRenderer.on('ai:stream-chunk', (_event, chunk) => callback(chunk));
+  },
+  onAIStreamDone: (callback: () => void) => {
+    ipcRenderer.on('ai:stream-done', () => callback());
+  },
+  onAIStreamError: (callback: (error: string) => void) => {
+    ipcRenderer.on('ai:stream-error', (_event, error) => callback(error));
+  },
+  removeAIStreamListeners: () => {
+    ipcRenderer.removeAllListeners('ai:stream-chunk');
+    ipcRenderer.removeAllListeners('ai:stream-done');
+    ipcRenderer.removeAllListeners('ai:stream-error');
+  },
   onOpenAISettings: (callback: () => void) => {
     ipcRenderer.on('menu:open-ai-settings', callback);
   },
   setRootFolder: (folderPath: string) => ipcRenderer.invoke('app:set-root-folder', folderPath),
   getRootFolder: () => ipcRenderer.invoke('app:get-root-folder'),
+  loadRecentFolder: () => ipcRenderer.invoke('app:load-recent-folder'),
 });

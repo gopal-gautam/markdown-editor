@@ -38,10 +38,15 @@ declare global {
       getProviders: () => Promise<ProviderInfo[]>;
       loadAIConfig: () => Promise<{ provider: AIProvider; model: string; apiKey: string; baseUrl: string } | null>;
       saveAIConfig: (config: { provider: AIProvider; model: string; apiKey: string; baseUrl: string }) => Promise<boolean>;
-      generateAI: (prompt: string) => Promise<{ result?: string; error?: string }>;
+      generateAIStream: (messages: { role: string; content: string }[]) => void;
+      onAIStreamChunk: (callback: (chunk: string) => void) => void;
+      onAIStreamDone: (callback: () => void) => void;
+      onAIStreamError: (callback: (error: string) => void) => void;
+      removeAIStreamListeners: () => void;
       onOpenAISettings: (callback: () => void) => void;
       setRootFolder: (folderPath: string) => Promise<boolean>;
       getRootFolder: () => Promise<string | null>;
+      loadRecentFolder: () => Promise<string | null>;
     };
   }
   const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
